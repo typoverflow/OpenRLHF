@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from peft import LoraConfig, get_peft_model
 from peft.tuners.lora import LoraLayer
-from transformers import AutoConfig, AutoModel, BitsAndBytesConfig
+from transformers import AutoConfig, AutoModel, BitsAndBytesConfig, AutoModelForCausalLM
 from transformers.deepspeed import HfDeepSpeedConfig
 from transformers.dynamic_module_utils import get_class_from_dynamic_module
 
@@ -287,3 +287,157 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
                 return values[:, -num_actions:]
 
     return CriticModel
+
+
+def get_llm_for_rff_critic(
+    model_name_or_path: str, 
+    model_type: str, 
+    *, 
+    bf16=True, 
+    load_in_4bit=False, 
+    lora_rank=0, 
+    lora_alpha=16, 
+    target_modules=None, 
+    lora_dropout=0, 
+    freeze_pretrain=True, 
+    use_flash_attention_2=False, 
+    ds_config: dict = None, 
+    init_value_head: bool = False, 
+    value_head_prefix="value_head", 
+    device_map=None, 
+    critic_hidden_size=512, 
+    **kwargs, 
+) -> nn.Module:
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    config._attn_implementation = "flash_attention_2" if use_flash_attention_2 else "eager"
+    config.critic_hidden_size = critic_hidden_size
+
+    base_class = AutoModelForCausalLM._model_mapping[type(config)]
+    base_pretrained_class = base_class.__base__
+
+    class Sin(nn.Module):
+        def forward(self, x):
+            return torch.sin(x)
+
+    class RFFCritic(base_class):
+        # supports_gradient_checkpointing = True
+
+        def __init__(self, config: AutoConfig):
+            super().__init__(config)
+            # setattr(self, self.base_model_prefix, base_class(config))
+
+            self.value_head_prefix = value_head_prefix
+            setattr(self, value_head_prefix, 
+                nn.Sequential(
+                    nn.Linear(config.hidden_size, config.critic_hidden_size), 
+                    Sin(), 
+                    nn.Linear(config.critic_hidden_size, config.critic_hidden_size), 
+                    nn.ReLU(), 
+                    nn.Linear(config.critic_hidden_size, 1)
+                )        
+            )
+        
+        def forward_with_value(
+            self,
+            input_ids: torch.LongTensor = None,
+            action_mask: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            return_output=False,
+        ) -> torch.Tensor:
+            # https://github.com/OpenRLHF/OpenRLHF/issues/217
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            outputs = super().forward(input_ids, attention_mask=attention_mask, position_ids=position_ids)
+            last_hidden_states = outputs["last_hidden_state"]
+            values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)[:, :-1]
+            num_actions = action_mask.size(1)
+
+            # normalize reward
+            if self.normalize_reward:
+                values = (values - self.mean) / self.std
+            outputs["values"] = values
+
+            if return_output:
+                return outputs if num_actions is None else (values[:, -num_actions:], outputs)
+            else:
+                return values[:, -num_actions:]
+
+    # Note: dschf is defined in function scope to avoid global effects
+    # https://huggingface.co/docs/transformers/main_classes/deepspeed#nontrainer-deepspeed-integration
+    if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        dschf = HfDeepSpeedConfig(ds_config)
+    else:
+        dschf = None
+
+    if load_in_4bit:
+        assert bf16, "we only support bnb_4bit_compute_dtype = bf16"
+        nf4_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    else:
+        nf4_config = None
+
+    model = RFFCritic.from_pretrained(
+        model_name_or_path,
+        config=config,
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16 if bf16 else "auto",
+        quantization_config=nf4_config,
+        device_map=device_map,
+        **kwargs,
+    )
+
+    # LoRA
+    if lora_rank > 0:
+        model.enable_input_require_grads()
+        lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_alpha,
+            target_modules=target_modules,
+            lora_dropout=lora_dropout,
+            bias="none",
+        )
+        model = get_peft_model(model, lora_config)
+
+        if load_in_4bit:
+            for name, module in model.named_modules():
+                if isinstance(module, LoraLayer):
+                    module = module.to(torch.bfloat16)
+                if "norm" in name:
+                    module = module.to(torch.float32)
+                if value_head_prefix in name or "embed_tokens" in name:
+                    if hasattr(module, "weight"):
+                        module = module.to(torch.bfloat16)
+
+    if freeze_pretrain:
+        for pname, p in model.named_parameters():
+            if "value_head" not in pname:
+                p.requires_grad = False
+                        
+    # MoE - balancing loss
+    model_config = model.config.to_dict()
+    if "output_router_logits" in model_config:
+        print("[MoE] set output_router_logits as True")
+        model.config.output_router_logits = True
+
+    # https://github.com/huggingface/transformers/issues/26877
+    model.config.use_cache = False
+
+    # NOTE: For reward model training only, intialize value_head manually
+    # because deepspeed.zero.Init() will not intialize them.
+    # TODO: Find a better way to clarify reward model training.
+    if init_value_head:
+        if dschf is not None:
+            logger.info("initialize value_head for ZeRO-3 reward model training.")
+            with deepspeed.zero.GatheredParameters([model.value_head.weight], modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    model.value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+        else:
+            model.value_head[0].weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+            model.value_head[2].weight.data.normal_(mean=0.0, std=1 / (config.critic_hidden_size + 1))
+            model.value_head[4].weight.data.normal_(mean=0.0, std=1 / (config.critic_hidden_size + 1))
+
+    return model
