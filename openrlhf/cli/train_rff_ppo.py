@@ -9,7 +9,7 @@ import torch
 from transformers.trainer import get_scheduler
 
 from openrlhf.datasets import PromptDataset, SFTDataset
-from openrlhf.models import Actor, get_llm_for_sequence_regression
+from openrlhf.models import Actor, get_llm_for_sequence_regression, get_llm_for_rff_critic
 from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
@@ -36,9 +36,11 @@ def train(args):
     if args.actor_init_on_gpu:
         actor = actor.to(torch.cuda.current_device())
 
-    critic = get_llm_for_sequence_regression(
+    critic = get_llm_for_rff_critic(
+    # critic = get_llm_for_sequence_regression(
         args.critic_pretrain,
-        "critic",
+        "rff_critic",
+        # "critic",
         normalize_reward=args.normalize_reward,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
@@ -50,6 +52,8 @@ def train(args):
         ds_config=strategy.get_ds_train_config(is_actor=False),
         value_head_prefix=args.value_head_prefix,
         init_value_head=strategy.args.pretrain == strategy.args.critic_pretrain,
+        freeze_pretrain=args.freeze_pretrain, 
+        critic_hidden_size=args.critic_hidden_size, 
     )
 
     if not args.remote_rm_url:
@@ -376,6 +380,9 @@ if __name__ == "__main__":
         default="ppo_%s" % datetime.now().strftime("%m%dT%H:%M"),
     )
 
+    # CHECK: below are hyper-parameters added by SR
+    parser.add_argument("--freeze_pretrain", action="store_true", default=False, help="whether freeze the rff critic")
+    parser.add_argument("--critic_hidden_size", type=int, default=512)
     args = parser.parse_args()
 
     if args.critic_pretrain is None:

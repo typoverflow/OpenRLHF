@@ -291,7 +291,7 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
 
 def get_llm_for_rff_critic(
     model_name_or_path: str, 
-    model_type: str, 
+    model_type: str,   # must be rff_critic
     *, 
     bf16=True, 
     load_in_4bit=False, 
@@ -299,32 +299,39 @@ def get_llm_for_rff_critic(
     lora_alpha=16, 
     target_modules=None, 
     lora_dropout=0, 
-    freeze_pretrain=True, 
+    normalize_reward=False,
     use_flash_attention_2=False, 
     ds_config: dict = None, 
     init_value_head: bool = False, 
     value_head_prefix="value_head", 
     device_map=None, 
+    packing_samples=False, 
+    freeze_pretrain=True, 
     critic_hidden_size=512, 
     **kwargs, 
 ) -> nn.Module:
+    """Get transformer with a rff value head on top
+    """
+    assert model_type == "rff_critic", f"model type must be rff_critic"
+    
     config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    config.normalize_reward = normalize_reward
     config._attn_implementation = "flash_attention_2" if use_flash_attention_2 else "eager"
     config.critic_hidden_size = critic_hidden_size
 
-    base_class = AutoModelForCausalLM._model_mapping[type(config)]
+    base_class = AutoModel._model_mapping[type(config)]
     base_pretrained_class = base_class.__base__
 
     class Sin(nn.Module):
         def forward(self, x):
             return torch.sin(x)
 
-    class RFFCritic(base_class):
-        # supports_gradient_checkpointing = True
+    class RFFCritic(base_pretrained_class):
+        supports_gradient_checkpointing = True
 
         def __init__(self, config: AutoConfig):
             super().__init__(config)
-            # setattr(self, self.base_model_prefix, base_class(config))
+            setattr(self, self.base_model_prefix, base_class(config))
 
             self.value_head_prefix = value_head_prefix
             setattr(self, value_head_prefix, 
@@ -336,27 +343,45 @@ def get_llm_for_rff_critic(
                     nn.Linear(config.critic_hidden_size, 1)
                 )        
             )
+            
+            self.packing_samples = packing_samples
+
+            # mean std
+            self.normalize_reward = config.normalize_reward
+            self.register_buffer("mean", torch.zeros(1), persistent=False)
+            self.register_buffer("std", torch.ones(1), persistent=False)
+
+            # load mean/std from config.json
+            if hasattr(config, "mean"):
+                self.mean[0] = config.mean
+                self.std[0] = config.std
         
-        def forward_with_value(
+        def forward(
             self,
             input_ids: torch.LongTensor = None,
             action_mask: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
             return_output=False,
         ) -> torch.Tensor:
-            # https://github.com/OpenRLHF/OpenRLHF/issues/217
-            position_ids = attention_mask.long().cumsum(-1) - 1
+            if not self.packing_samples:
+                # https://github.com/OpenRLHF/OpenRLHF/issues/217
+                position_ids = attention_mask.long().cumsum(-1) - 1
+            else:
+                # reset the positions for packed samples
+                position_ids = reset_position_ids(attention_mask)
             position_ids.masked_fill_(attention_mask == 0, 1)
-            outputs = super().forward(input_ids, attention_mask=attention_mask, position_ids=position_ids)
+
+            outputs = getattr(self, self.base_model_prefix)(
+                input_ids, attention_mask=attention_mask, position_ids=position_ids
+            )
             last_hidden_states = outputs["last_hidden_state"]
             values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)[:, :-1]
             num_actions = action_mask.size(1)
-
+            
             # normalize reward
             if self.normalize_reward:
                 values = (values - self.mean) / self.std
-            outputs["values"] = values
-
+            
             if return_output:
                 return outputs if num_actions is None else (values[:, -num_actions:], outputs)
             else:
@@ -412,6 +437,8 @@ def get_llm_for_rff_critic(
                     if hasattr(module, "weight"):
                         module = module.to(torch.bfloat16)
 
+    # freeze the base model
+    # should be used when LoRA is not enabled
     if freeze_pretrain:
         for pname, p in model.named_parameters():
             if "value_head" not in pname:
@@ -425,6 +452,12 @@ def get_llm_for_rff_critic(
 
     # https://github.com/huggingface/transformers/issues/26877
     model.config.use_cache = False
+    
+    # packing samples using Flash Attention 2
+    if packing_samples:
+        assert use_flash_attention_2, "Only support `--packing_samples` with Flash Attention 2."
+        model_type = getattr(model.config, "model_type", None)
+        patch_for_block_diag_attn(model_type)
 
     # NOTE: For reward model training only, intialize value_head manually
     # because deepspeed.zero.Init() will not intialize them.
