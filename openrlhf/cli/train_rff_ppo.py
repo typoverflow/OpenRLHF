@@ -8,10 +8,16 @@ from datetime import datetime
 import torch
 from transformers.trainer import get_scheduler
 
-from openrlhf.datasets import PromptDataset, SFTDataset
+# from openrlhf.datasets import PromptDataset, SFTDataset
 from openrlhf.models import Actor, get_llm_for_sequence_regression, get_llm_for_rff_critic
-from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
+
+# add by sR
+from openrlhf.reasoning_utils.dataset import prepare_reasoning_dataset
+from openrlhf.reasoning_utils.dataset import ReasoningPromptDataset
+from openrlhf.datasets import SFTDataset
+from openrlhf.reasoning_utils.reward_fn import get_post_process_answer_cot_fn, get_post_process_answer_value_fn, get_compare_answer_fn
+from openrlhf.reasoning_utils.ppo_trainer import PPOTrainer
 
 
 def train(args):
@@ -56,20 +62,29 @@ def train(args):
         critic_hidden_size=args.critic_hidden_size, 
     )
 
-    if not args.remote_rm_url:
-        reward_model = get_llm_for_sequence_regression(
-            args.reward_pretrain,
-            "reward",
-            normalize_reward=args.normalize_reward,
-            use_flash_attention_2=args.flash_attn,
-            bf16=args.bf16,
-            load_in_4bit=args.load_in_4bit,
-            ds_config=strategy.get_ds_train_config(is_actor=False),
-            value_head_prefix=args.value_head_prefix,
-        )
-        get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
-    else:
-        reward_model = None
+    # # TODO: remove the reward model and use rule based checker
+    # if not args.remote_rm_url:
+    #     reward_model = get_llm_for_sequence_regression(
+    #         args.reward_pretrain,
+    #         "reward",
+    #         normalize_reward=args.normalize_reward,
+    #         use_flash_attention_2=args.flash_attn,
+    #         bf16=args.bf16,
+    #         load_in_4bit=args.load_in_4bit,
+    #         ds_config=strategy.get_ds_train_config(is_actor=False),
+    #         value_head_prefix=args.value_head_prefix,
+    #     )
+    #     get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
+    # else:
+    #     reward_model = None
+        
+    # TODO determine which function to use
+    reward_model = None # we don't need reward model
+    reward_fn = {
+        "post_process_answer_value": get_post_process_answer_value_fn(args.reasoning_dataset), 
+        "post_process_answer_cot": get_post_process_answer_cot_fn(args.reasoning_dataset, args.cot_mode),
+        "compare_answer": get_compare_answer_fn(args.reasoning_dataset),
+    }
 
     strategy.print("reward normalization status: {}".format(args.normalize_reward))
     strategy.print("mean: {}, std {}".format(critic.mean, critic.std))
@@ -120,17 +135,28 @@ def train(args):
     )
 
     # prepare datasets
-    prompts_data = blending_datasets(
-        args.prompt_data,
-        args.prompt_data_probs,
-        strategy,
-        args.seed,
-        max_count=args.max_samples,
-        return_eval=False,
-        train_split=args.prompt_split,
+    prompts_data = prepare_reasoning_dataset(
+        dataset=args.reasoning_dataset, 
+        cot_mode=args.cot_mode, 
+        tokenizer=tokenizer, 
+        max_len=args.prompt_max_len, 
+        strategy=strategy, 
+        seed=42, 
+        max_count=args.max_samples, 
+        return_eval=False, 
     )
-    prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
-    prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
+    prompts_dataset = ReasoningPromptDataset(prompts_data, tokenizer, strategy)
+    # prompts_data = blending_datasets(
+    #     args.prompt_data,
+    #     args.prompt_data_probs,
+    #     strategy,
+    #     args.seed,
+    #     max_count=args.max_samples,
+    #     return_eval=False,
+    #     train_split=args.prompt_split,
+    # )
+    # prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
+    # prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
 
     if args.pretrain_data:
         pretrain_data = blending_datasets(
@@ -252,6 +278,7 @@ def train(args):
         eos_token_id=tokenizer.eos_token_id,
         # remote reward model
         remote_rm_url=args.remote_rm_url,
+        reward_fn=reward_fn, 
     )
 
     trainer.fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
@@ -383,6 +410,8 @@ if __name__ == "__main__":
     # CHECK: below are hyper-parameters added by SR
     parser.add_argument("--freeze_pretrain", action="store_true", default=False, help="whether freeze the rff critic")
     parser.add_argument("--critic_hidden_size", type=int, default=512)
+    parser.add_argument("--reasoning_dataset", type=str, default="gsm8k", help="Dataset prefix")
+    parser.add_argument("--cot_mode", type=str, default="nl", help="CoT mode, nl or python_sdp")
     args = parser.parse_args()
 
     if args.critic_pretrain is None:
