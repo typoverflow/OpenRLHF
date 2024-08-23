@@ -1,0 +1,21 @@
+deepspeed --module openrlhf.cli.train_sft \
+   --max_len 4096 \
+   --dataset Open-Orca/OpenOrca \
+   --input_key question \
+   --output_key response \
+   --input_template 'User: {}\nAssistant: ' \
+   --train_batch_size 256 \
+   --micro_train_batch_size 2 \
+   --max_samples 500000 \
+   --pretrain meta-llama/Meta-Llama-3-8B \
+   --save_path ./checkpoint/llama3-8b-sft \
+   --save_steps -1 \
+   --logging_steps 1 \
+   --eval_steps -1 \
+   --zero_stage 2 \
+   --max_epochs 1 \
+   --bf16 \
+   --flash_attn \
+   --learning_rate 5e-6 \
+   --gradient_checkpointing \
+   --use_wandb {wandb_token}

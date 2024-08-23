@@ -5,11 +5,11 @@ from datasets import load_dataset, load_from_disk, DatasetDict, Dataset, concate
 from tqdm import tqdm
 import torch
 
+from openrlhf.datasets.utils import zero_pad_sequences
+
 def prepare_reasoning_dataset(
     dataset, 
     cot_mode, 
-    tokenizer, 
-    max_len, 
     strategy=None, 
     seed=42, 
     max_count=5000000, 
@@ -29,12 +29,11 @@ def prepare_reasoning_dataset(
     # setup CoT
     assert dataset in {"gsm8k", "mathqa", "svamp", "mathqa-numeric"}
     assert cot_mode in {"nl", "python_sdp"}
-    instruction = "Question:\n"
+    instruction = "Question:\’"
     cot_trigger = "\nAnswer reasoning:\n"
     answer_trigger = "\nTherefore, the answer is: "
     
-    def tokenize_fn(batch, max_len, tokenizer):
-        assert tokenizer.eos_token_id is not None
+    def tokenize_fn(batch):
         new_batch = defaultdict(list)
         all_keys = batch.keys()
         for item_values in zip(*(batch[k] for k in all_keys)):
@@ -45,6 +44,8 @@ def prepare_reasoning_dataset(
                 item["answer_value"], \
                 item.get("answer_cot", None)
             question = question.strip()
+            if question.startswith("Janet’s ducks"):
+                pass
             if answer_value is not None:
                 answer_value = answer_value.strip()
             if answer_cot is not None:
@@ -99,7 +100,7 @@ def prepare_reasoning_dataset(
     train_dataset = train_dataset\
     .select(range(min(max_count, len(raw_dataset["train"]))))\
     .map(
-        tokenize_fn, fn_kwargs={"max_len": max_len, "tokenizer": tokenizer}, 
+        tokenize_fn, 
         batched=True,
         remove_columns=train_dataset.column_names, 
         num_proc=None, 
@@ -111,7 +112,7 @@ def prepare_reasoning_dataset(
         eval_dataset = eval_dataset\
         .select(range(min(max_count, len(raw_dataset["test"]))))\
         .map(
-            tokenize_fn, fn_kwargs={"max_len": max_len, "tokenizer": tokenizer}, 
+            tokenize_fn,
             batched=True,
             remove_columns=eval_dataset.column_names, 
             num_proc=None, 
@@ -171,24 +172,93 @@ class ReasoningSFTDataset(torch.utils.data.Dataset):
         self, 
         dataset, 
         tokenizer, 
+        max_length: int, 
         strategy, 
         pretrain_mode=False, 
     ) -> None:
         super().__init__()
         self.tokenizer = tokenizer
+        self.strategy = strategy
         self.pretrain_mode = pretrain_mode
+        self.max_length = max_length
+        
+        self.processed_dataset = dataset.map(
+            self.process_data, 
+            remove_columns=dataset.column_names, 
+        )
+        # processed_dataset = processed_dataset.filter(lambda x: x["prompt"] is not None)
 
+    def process_data(self, data):
+        prompt, answer_value, response = data["prompt"], data["answer_value"], data["answer_cot"]
+        prompt_token = self.tokenizer(prompt, add_special_tokens=False)
+        prompt_ids_len = len(prompt_token["input_ids"])
+        if response is None:
+            input_ids = prompt_token["input_ids"] + [self.tokenizer.eos_token_id]
+        else:
+            response_token = self.tokenizer(response, add_special_tokens=False)
+            input_ids = prompt_token["input_ids"] + response_token["input_ids"] + [self.tokenizer.eos_token_id]
+        attention_mask = [1] * len(input_ids)
+        prompt_ids = prompt_token["input_ids"]
+        prompt_attention_mask = prompt_token["attention_mask"]
+
+        # truncation
+        input_ids = input_ids[:self.max_length]
+        attention_mask = attention_mask[:self.max_length]
+        prompt_ids = prompt_ids[:self.max_length]
+        prompt_attention_mask = prompt_attention_mask[:self.max_length]
+
+        return {
+            "input_ids": input_ids, 
+            "attention_mask": attention_mask, 
+            "prompt_ids": prompt_ids, 
+            "prompt_attention_mask": prompt_attention_mask, 
+            "prompt_ids_len": prompt_ids_len, 
+            "answer_value": answer_value, 
+        }
 
     def __len__(self):
-        length = len(self.input_ids)
+        length = len(self.processed_dataset)
         return length
-
+    
     def __getitem__(self, idx):
-        # TODO: need to consider truncation
-        full_input_ids = self.input_ids[idx] + self.answer_cot[idx]
-        full_input_ids += [self.tokenzier.eos_token_id]
-        return self.input_ids
-        if not self.pretrain_mode:
-            text = self.input_ids[idx] + self.answer_cot[idx]
-        else:
-            pass
+        item = self.processed_dataset[idx]
+        return {
+            "input_ids": torch.LongTensor(item["input_ids"]),
+            "attention_mask": torch.BoolTensor(item["attention_mask"]),
+            "prompt_ids": torch.LongTensor(item["prompt_ids"]),
+            "prompt_attention_mask": torch.BoolTensor(item["prompt_attention_mask"]),
+            "prompt_ids_len": item["prompt_ids_len"], 
+            "answer_value": item["answer_value"],
+        }
+    
+    def collate_fn(self, item_list):
+        # collate and pad the tokens
+        # 1. basically, input_ids are prompt + response + eos, while prompt_ids are promt without eos. 
+        #   if the dataset is the eval dataset without response, then input_ids is identical to prompt_ids
+        # 2. apart from this, input_ids is always right padded, while prompt_ids is always left padded. 
+        input_ids = []
+        attention_mask = []
+        prompt_ids = []
+        prompt_attention_mask = []
+        prompt_ids_len = []
+        answer_value = []
+        
+        for item in item_list:
+            input_ids.append(item["input_ids"])
+            attention_mask.append(item["attention_mask"])
+            prompt_ids.append(item["prompt_ids"])
+            prompt_attention_mask.append(item["prompt_attention_mask"])
+            prompt_ids_len.append(item["prompt_ids_len"])
+            answer_value.append(item["answer_value"])
+        
+        input_ids = zero_pad_sequences(input_ids, "right", self.tokenizer.pad_token_id)
+        attention_mask = zero_pad_sequences(attention_mask, "right")
+        prompt_ids = zero_pad_sequences(prompt_ids, "left", self.tokenizer.pad_token_id)
+        prompt_attention_mask = zero_pad_sequences(prompt_attention_mask, "left")
+
+        return prompt_ids_len, input_ids, attention_mask, {
+            "prompt_ids": prompt_ids, 
+            "prompt_attention_mask": prompt_attention_mask, 
+            "answer_value": answer_value
+        }
+

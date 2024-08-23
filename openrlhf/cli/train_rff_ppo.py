@@ -138,8 +138,6 @@ def train(args):
     prompts_data = prepare_reasoning_dataset(
         dataset=args.reasoning_dataset, 
         cot_mode=args.cot_mode, 
-        tokenizer=tokenizer, 
-        max_len=args.prompt_max_len, 
         strategy=strategy, 
         seed=42, 
         max_count=args.max_samples, 
