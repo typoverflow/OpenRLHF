@@ -16,7 +16,7 @@ from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 from openrlhf.reasoning_utils.dataset import prepare_reasoning_dataset
 from openrlhf.reasoning_utils.dataset import ReasoningPromptDataset
 from openrlhf.datasets import SFTDataset
-from openrlhf.reasoning_utils.reward_fn import get_post_process_answer_cot_fn, get_post_process_answer_value_fn, get_compare_answer_fn
+from openrlhf.reasoning_utils.reward_fn import setup_reward
 from openrlhf.reasoning_utils.ppo_trainer import PPOTrainer
 
 
@@ -80,11 +80,7 @@ def train(args):
         
     # TODO determine which function to use
     reward_model = None # we don't need reward model
-    reward_fn = {
-        "post_process_answer_value": get_post_process_answer_value_fn(args.reasoning_dataset), 
-        "post_process_answer_cot": get_post_process_answer_cot_fn(args.reasoning_dataset, args.cot_mode),
-        "compare_answer": get_compare_answer_fn(args.reasoning_dataset),
-    }
+    setup_reward(args.reasoning_dataset, args.cot_mode)   # IMPORTANT: setup the global variables for reward calculation
 
     strategy.print("reward normalization status: {}".format(args.normalize_reward))
     strategy.print("mean: {}, std {}".format(critic.mean, critic.std))
@@ -276,7 +272,6 @@ def train(args):
         eos_token_id=tokenizer.eos_token_id,
         # remote reward model
         remote_rm_url=args.remote_rm_url,
-        reward_fn=reward_fn, 
     )
 
     trainer.fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)

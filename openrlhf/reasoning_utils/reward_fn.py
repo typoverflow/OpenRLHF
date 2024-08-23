@@ -9,6 +9,15 @@ global_restricted = {lib: globals()[lib] for lib in ['sympy', 'math']}
 # del global_restricted['sympy'].init_session
 local_restricted = {}
 
+DATASET = "gsm8k"
+COT_MODE = "nl"
+
+def setup_reward(dataset, cot_mode):
+    global DATASET
+    DATASET = dataset
+    global COT_MODE
+    COT_MODE = cot_mode
+
 class timeout:
     def __init__(self, seconds=1, error_message='Timeout'):
         self.seconds = seconds
@@ -94,35 +103,83 @@ def run_python_code(programs, TIMEOUT: float, safe=True):
 
     return results
 
-def get_post_process_answer_cot_fn(dataset, cot_mode):
-    answer_trigger = "\nTherefore, the answer is: "
-    return {
-        "python": {
-            "gsm8k": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
-            "svamp": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
-            "mathqa": lambda answer_cot: [str(res).lower().replace('"','').replace("'","").strip() for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
-            "mathqa-numeric": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
-        }, 
-        "nl": {
-            "gsm8k": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
-            "svamp": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
-            "mathqa": lambda answer_cot: [res.split(answer_trigger)[-1].lower().replace('"','').replace("'",'').strip() for res in answer_cot],
-            "mathqa-numeric": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
-        }
-    }.get(cot_mode).get(dataset)
-    
-def get_compare_answer_fn(dataset):
-    return {
-        "gsm8k": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
-        "svamp": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
-        "mathqa": lambda extracted_ans, target_answer: extracted_ans == target_answer,
-        "mathqa-numeric": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
-    }.get(dataset)
+# def get_post_process_answer_cot_fn(dataset, cot_mode):
+#     answer_trigger = "\nTherefore, the answer is: "
+#     return {
+#         "python": {
+#             "gsm8k": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+#             "svamp": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+#             "mathqa": lambda answer_cot: [str(res).lower().replace('"','').replace("'","").strip() for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+#             "mathqa-numeric": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+#         }, 
+#         "nl": {
+#             "gsm8k": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+#             "svamp": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+#             "mathqa": lambda answer_cot: [res.split(answer_trigger)[-1].lower().replace('"','').replace("'",'').strip() for res in answer_cot],
+#             "mathqa-numeric": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+#         }
+#     }.get(cot_mode).get(dataset)
 
-def get_post_process_answer_value_fn(dataset):
-    return {
-        'gsm8k': lambda x: float(x.replace(',','').strip()),
-        'svamp': lambda x: float(x.replace(',','').strip()),
-        'mathqa': lambda x: x.lower().replace('"','').replace("'",'').strip(),
-        'mathqa-numeric': lambda x: float(x),
-    }.get(dataset)
+answer_trigger = "\nTherefore, the answer is: "
+post_process_answer_cot_fn = {
+    "python": {
+        "gsm8k": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+        "svamp": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+        "mathqa": lambda answer_cot: [str(res).lower().replace('"','').replace("'","").strip() for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+        "mathqa-numeric": lambda answer_cot: [floatify(res) for res in run_python_code(programs=answer_cot, TIMEOUT=TIMEOUT)], 
+    }, 
+    "nl": {
+        "gsm8k": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+        "svamp": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+        "mathqa": lambda answer_cot: [res.split(answer_trigger)[-1].lower().replace('"','').replace("'",'').strip() for res in answer_cot],
+        "mathqa-numeric": lambda answer_cot: [floatify(res.split(answer_trigger)[-1].strip()) for res in answer_cot],
+    }
+}
+    
+# def get_compare_answer_fn(dataset):
+#     return {
+#         "gsm8k": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+#         "svamp": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+#         "mathqa": lambda extracted_ans, target_answer: extracted_ans == target_answer,
+#         "mathqa-numeric": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+#     }.get(dataset)
+
+compare_answer_fn = {
+    "gsm8k": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+    "svamp": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+    "mathqa": lambda extracted_ans, target_answer: extracted_ans == target_answer,
+    "mathqa-numeric": lambda extracted_ans, target_answer: abs(extracted_ans - target_answer) <= 1e-2,
+}
+
+# def get_post_process_answer_value_fn(dataset):
+#     return {
+#         'gsm8k': lambda x: float(x.replace(',','').strip()),
+#         'svamp': lambda x: float(x.replace(',','').strip()),
+#         'mathqa': lambda x: x.lower().replace('"','').replace("'",'').strip(),
+#         'mathqa-numeric': lambda x: float(x),
+#     }.get(dataset)
+    
+post_process_answer_value_fn = {
+    'gsm8k': lambda x: float(x.replace(',','').strip()),
+    'svamp': lambda x: float(x.replace(',','').strip()),
+    'mathqa': lambda x: x.lower().replace('"','').replace("'",'').strip(),
+    'mathqa-numeric': lambda x: float(x),
+}
+
+
+def calculate_reward(generated_texts, answer_values):
+    dataset = DATASET
+    cot_mode = COT_MODE
+    pred_values = post_process_answer_cot_fn[cot_mode][dataset](generated_texts)
+    correctness = []
+    for pred_value, target_value in zip(pred_values, answer_values):
+        target_value = post_process_answer_value_fn[dataset](target_value)
+        if pred_value is not None:
+            if compare_answer_fn[dataset](pred_value, target_value):
+                is_correct = 1
+            else:
+                is_correct = 0.1
+        else:
+            is_correct = 0
+        correctness.append(is_correct)
+    return correctness

@@ -11,6 +11,7 @@ from openrlhf.datasets import SFTDataset
 from openrlhf.models import GPTLMLoss
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
+from openrlhf.reasoning_utils.reward_fn import calculate_reward
 
 class SFTTrainer(ABC):
     """
@@ -40,6 +41,7 @@ class SFTTrainer(ABC):
         batch_size: int = 1,
         max_epochs: int = 2,
         tokenizer=None,
+        **generate_kwargs
     ) -> None:
         super().__init__()
         self.strategy = strategy
@@ -54,6 +56,7 @@ class SFTTrainer(ABC):
         self.tokenizer = tokenizer
         self.optimizer = optim
         self.args = strategy.args
+        self.generate_kwargs = generate_kwargs
 
         self.loss_fn = GPTLMLoss()
 
@@ -205,6 +208,7 @@ class SFTTrainer(ABC):
         self.model.eval()
         with torch.no_grad():
             loss_sum = 0
+            reward_sum = 0
             step_bar = tqdm(
                 range(eval_dataloader.__len__()),
                 desc="Eval stage of steps %d" % steps,
@@ -240,9 +244,21 @@ class SFTTrainer(ABC):
 
                 loss = self.loss_fn(output.logits, labels)
 
+                # generation
+                prompt_ids = infos["prompt_ids"].to(torch.cuda.current_device())
+                prompt_attention_mask = infos["prompt_attention_mask"].to(torch.cuda.current_device())
+                sequences, attention_mask, action_mask = self.model.generate(
+                    input_ids=prompt_ids, 
+                    attention_mask=prompt_attention_mask, 
+                    **self.generate_kwargs
+                )
+                generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
+                reward = calculate_reward(generated_texts, infos["answer_value"])
+
                 times += 1
                 loss_sum += loss.item()
-                bar_dict = {"eval gpt_loss": loss_sum / times}
+                reward_sum += sum(reward)
+                bar_dict = {"eval gpt_loss": loss_sum / times, "eval reward": reward_sum / times}
                 step_bar.update()
                 logs = self.strategy.all_reduce(bar_dict)
                 step_bar.set_postfix(logs)

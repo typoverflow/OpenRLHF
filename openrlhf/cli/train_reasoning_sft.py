@@ -110,7 +110,6 @@ def train(args):
         True,
         False,
         eval_dataset.packing_collate_fn if args.packing_samples else eval_dataset.collate_fn,
-        drop_last=False
     )
 
     # scheduler
@@ -150,6 +149,15 @@ def train(args):
         batch_size=args.train_batch_size,
         max_epochs=args.max_epochs,
         tokenizer=tokenizer,
+        # for GPT generation
+        max_new_tokens=args.max_new_tokens, 
+        do_sample=False, 
+        top_p=args.top_p, 
+        early_stopping=True, 
+        num_beams=1, 
+        temperature=args.temperature, 
+        pad_token_id=tokenizer.pad_token_id, 
+        eos_token_id=tokenizer.eos_token_id
     )
 
     trainer.fit(args, consumed_samples, num_update_steps_per_epoch)
@@ -237,6 +245,9 @@ if __name__ == "__main__":
     # CHECK: below are hyper-parameters added by SR
     parser.add_argument("--reasoning_dataset", type=str, default="gsm8k", help="Dataset prefix")
     parser.add_argument("--cot_mode", type=str, default="nl", help="CoT mode, nl or python_sdp")
+    parser.add_argument("--max_new_tokens", type=int, default=1024, help="Max number of generated tokens for SFT evaluation.")
+    parser.add_argument("--top_p", type=float, default=1.0, help="top_p for Sampling.")
+    parser.add_argument("--temperature", type=float, default=1.0, help="temperature for Sampling")
 
     args = parser.parse_args()
 

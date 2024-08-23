@@ -15,6 +15,8 @@ from openrlhf.models.utils import compute_reward, masked_mean
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
 
+from openrlhf.reasoning_utils.reward_fn import calculate_reward
+
 logger = init_logger(__name__)
 
 
@@ -146,19 +148,21 @@ class NaiveExperienceMaker(ABC):
         
         # compute reward using the provided reward_fn
         generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
-        pred_values = self.reward_fn["post_process_answer_cot"](generated_texts)
-        correctness = []
-        for pred_value, target_value in zip(pred_values, answer_values):
-            target_value = self.reward_fn["post_process_answer_value"](target_value)
-            if pred_value is not None:
-                if self.reward_fn["compare_answer"](pred_value, target_value):
-                    is_correct = 1
-                else:
-                    is_correct = 0.1
-            else:
-                is_correct = 0
-            correctness.append(is_correct)
-        r = torch.tensor(correctness).to(action_log_probs.device)
+        # pred_values = self.reward_fn["post_process_answer_cot"](generated_texts)
+        # correctness = []
+        # for pred_value, target_value in zip(pred_values, answer_values):
+        #     target_value = self.reward_fn["post_process_answer_value"](target_value)
+        #     if pred_value is not None:
+        #         if self.reward_fn["compare_answer"](pred_value, target_value):
+        #             is_correct = 1
+        #         else:
+        #             is_correct = 0.1
+        #     else:
+        #         is_correct = 0
+        #     correctness.append(is_correct)
+        # r = torch.tensor(correctness).to(action_log_probs.device)
+        r = calculate_reward(generated_texts, answer_values)
+        r = torch.tensor(r).to(action_log_probs.device)
 
         reward, kl = compute_reward(
             r,
