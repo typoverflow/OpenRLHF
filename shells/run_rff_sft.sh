@@ -1,5 +1,5 @@
 deepspeed --module openrlhf.cli.train_reasoning_sft \
-   --max_len 4096 \
+   --max_len 2048 \
    --train_batch_size 128 \
    --micro_train_batch_size 32 \
    --max_samples 500000 \
@@ -7,16 +7,15 @@ deepspeed --module openrlhf.cli.train_reasoning_sft \
    --save_path ./checkpoint/llama3-8b-sft \
    --logging_steps 1 \
    --zero_stage 2 \
-   --max_epochs 4 \
+   --max_epochs 10 \
    --bf16 \
    --flash_attn \
    --learning_rate 2e-5 \
    --gradient_checkpointing \
-   --eval_steps 128 \
-   --save_steps 128 \
+   --eval_steps -1 \
+   --save_steps 64 \
    --max_ckpt_num 1 \
    --reasoning_dataset gsm8k \
    --cot_mode nl \
    --max_new_tokens 1024 \
-   --use_wandb 873bf35f283defae45b0d2a39312deaed163f7d6 \
-   --wandb_project Reasoning-SFT
+   --use_wandb 873bf35f283defae45b0d2a39312deaed163f7d6
