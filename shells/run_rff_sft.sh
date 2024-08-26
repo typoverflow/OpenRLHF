@@ -15,7 +15,7 @@ deepspeed \
    --learning_rate 2e-5 \
    --gradient_checkpointing \
    --eval_steps -1 \
-   --save_steps 64 \
+   --save_steps -1 \
    --max_ckpt_num 1 \
    --reasoning_dataset gsm8k \
    --cot_mode nl \
