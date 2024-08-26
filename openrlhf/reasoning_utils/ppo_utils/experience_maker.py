@@ -16,6 +16,7 @@ from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
 
 from openrlhf.reasoning_utils.reward_fn import calculate_reward
+from openrlhf.models.actor_critic import CausalLMWithRFFCriticOutputWithPast
 
 logger = init_logger(__name__)
 
@@ -135,7 +136,13 @@ class NaiveExperienceMaker(ABC):
         base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
 
         # values
-        value = self.critic(sequences, action_mask, attention_mask)
+        value = self.critic(
+            input_ids=sequences, 
+            action_mask=action_mask, 
+            attention_mask=attention_mask
+        )
+        if isinstance(value, CausalLMWithRFFCriticOutputWithPast):
+            value = value.values
 
         # # rewards
         # if self.remote_rm_url is not None:

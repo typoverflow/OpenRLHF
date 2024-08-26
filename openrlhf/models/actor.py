@@ -113,6 +113,7 @@ class Actor(nn.Module):
                 patch_for_block_diag_attn(model_type)
         else:
             self.model = pretrain_or_model
+            self.packing_samples = packing_samples
 
     @torch.no_grad()
     def generate(self, input_ids: torch.Tensor, **kwargs) -> Union[

@@ -17,6 +17,8 @@ from openrlhf.utils.distributed_sampler import DistributedSampler
 
 from openrlhf.trainer.ppo_utils import AdaptiveKLController, FixedKLController, NaiveReplayBuffer
 from .ppo_utils.experience_maker import Experience, NaiveExperienceMaker
+from openrlhf.models.actor_critic import CausalLMWithRFFCriticOutputWithPast
+
 
 
 class PPOTrainer(ABC):
@@ -372,12 +374,13 @@ class PPOTrainer(ABC):
         self.critic.train()
 
         # critic loss
-        values, output = self.critic(
+        values = self.critic(
             experience.sequences,
             action_mask=experience.action_mask,
             attention_mask=experience.attention_mask,
-            return_output=True,
         )
+        if isinstance(values, CausalLMWithRFFCriticOutputWithPast):
+            values = values.values
         # loss function
         critic_loss = self.critic_loss_fn(
             values,
