@@ -1,9 +1,11 @@
-deepspeed --module openrlhf.cli.train_reasoning_sft \
+deepspeed \
+   --include localhost:4,5,6,7 \
+   --module openrlhf.cli.train_reasoning_sft \
    --max_len 2048 \
    --train_batch_size 128 \
    --micro_train_batch_size 32 \
    --max_samples 500000 \
-   --pretrain meta-llama/Meta-Llama-3.1-8B \
+   --pretrain meta-llama/Meta-Llama-3-8B \
    --save_path ./checkpoint/llama3-8b-sft \
    --logging_steps 1 \
    --zero_stage 2 \
