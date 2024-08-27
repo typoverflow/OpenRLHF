@@ -257,7 +257,7 @@ class SFTTrainer(ABC):
 
                 times += 1
                 loss_sum += loss.item()
-                reward_sum += sum(reward)
+                reward_sum += sum(reward) / len(reward)
                 bar_dict = {"eval gpt_loss": loss_sum / times, "eval reward": reward_sum / times}
                 step_bar.update()
                 logs = self.strategy.all_reduce(bar_dict)
