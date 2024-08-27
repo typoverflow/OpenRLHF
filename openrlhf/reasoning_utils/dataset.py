@@ -29,7 +29,7 @@ def prepare_reasoning_dataset(
     # setup CoT
     assert dataset in {"gsm8k", "mathqa", "svamp", "mathqa-numeric"}
     assert cot_mode in {"nl", "python_sdp"}
-    instruction = "Question:\’"
+    instruction = "Question:\n"
     cot_trigger = "\nAnswer reasoning:\n"
     answer_trigger = "\nTherefore, the answer is: "
     

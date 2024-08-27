@@ -262,6 +262,14 @@ class SFTTrainer(ABC):
                 step_bar.update()
                 logs = self.strategy.all_reduce(bar_dict)
                 step_bar.set_postfix(logs)
+                
+            ### print the results
+            if self.strategy.is_rank_0():
+                self.strategy.print(f"######### Evaluation #########")
+                for _ in range(min(len(generated_texts), 4)):
+                    self.strategy.print(f"Reward: {reward[_]}, Text: {generated_texts[_]}")
+                    self.strategy.print(f"##############")
+            ###
 
             if self._wandb is not None and self.strategy.is_rank_0():
                 logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": steps}.items()}
