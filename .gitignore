@@ -152,3 +152,4 @@ core
 assets/
 wandb/
 ckpt/
+checkpoint/
