@@ -183,3 +183,21 @@ def calculate_reward(generated_texts, answer_values):
             is_correct = 0
         correctness.append(is_correct)
     return correctness
+
+def calculate_accuracy(generated_texts, answer_values):
+    dataset = DATASET
+    cot_mode = COT_MODE
+    pred_values = post_process_answer_cot_fn[cot_mode][dataset](generated_texts)
+    correctness = []
+    for pred_value, target_value in zip(pred_values, answer_values):
+        target_value = post_process_answer_value_fn[dataset](target_value)
+        if pred_value is not None:
+            if compare_answer_fn[dataset](pred_value, target_value):
+                is_correct = 1
+            else:
+                is_correct = 0
+        else:
+            is_correct = 0
+        correctness.append(is_correct)
+    return correctness
+    

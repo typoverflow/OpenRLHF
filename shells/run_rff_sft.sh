@@ -9,12 +9,12 @@ deepspeed \
    --save_path ./checkpoint/llama3-8b-sft \
    --logging_steps 1 \
    --zero_stage 2 \
-   --max_epochs 10 \
+   --max_epochs 5 \
    --bf16 \
    --flash_attn \
    --learning_rate 1e-5 \
    --gradient_checkpointing \
-   --eval_steps 256 \
+   --eval_steps -1 \
    --save_steps -1 \
    --max_ckpt_num 1 \
    --reasoning_dataset gsm8k \

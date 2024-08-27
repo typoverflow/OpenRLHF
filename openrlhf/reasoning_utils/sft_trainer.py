@@ -11,7 +11,7 @@ from openrlhf.datasets import SFTDataset
 from openrlhf.models import GPTLMLoss
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
-from openrlhf.reasoning_utils.reward_fn import calculate_reward
+from openrlhf.reasoning_utils.reward_fn import calculate_accuracy
 
 class SFTTrainer(ABC):
     """
@@ -253,7 +253,7 @@ class SFTTrainer(ABC):
                     **self.generate_kwargs
                 )
                 generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
-                reward = calculate_reward(generated_texts, infos["answer_value"])
+                reward = calculate_accuracy(generated_texts, infos["answer_value"])
 
                 times += 1
                 loss_sum += loss.item()
