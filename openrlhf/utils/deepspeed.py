@@ -109,6 +109,15 @@ class DeepspeedStrategy(ABC):
             model = model.model
         model.step()
 
+    def zero_grad(
+        self, 
+        optimizer: optim.Optimizer, 
+        model: nn.Module, 
+    ) -> None:
+        if isinstance(model, Actor):
+            model = model.model
+        model.zero_grad()
+
     def setup_dataloader(
         self,
         replay_buffer,

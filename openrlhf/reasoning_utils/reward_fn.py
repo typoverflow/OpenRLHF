@@ -176,11 +176,11 @@ def calculate_reward(generated_texts, answer_values):
         target_value = post_process_answer_value_fn[dataset](target_value)
         if pred_value is not None:
             if compare_answer_fn[dataset](pred_value, target_value):
-                is_correct = 1
+                is_correct = 1.0
             else:
                 is_correct = 0.1
         else:
-            is_correct = 0
+            is_correct = 0.0
         correctness.append(is_correct)
     return correctness
 
