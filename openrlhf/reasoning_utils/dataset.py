@@ -44,8 +44,6 @@ def prepare_reasoning_dataset(
                 item["answer_value"], \
                 item.get("answer_cot", None)
             question = question.strip()
-            if question.startswith("Janet’s ducks"):
-                pass
             if answer_value is not None:
                 answer_value = answer_value.strip()
             if answer_cot is not None:

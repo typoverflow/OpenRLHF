@@ -41,6 +41,7 @@ class SFTTrainer(ABC):
         batch_size: int = 1,
         max_epochs: int = 2,
         tokenizer=None,
+        accuracy_fn=None, 
         **generate_kwargs
     ) -> None:
         super().__init__()
@@ -54,6 +55,7 @@ class SFTTrainer(ABC):
         self.pretrain_mode = pretrain_mode
         self.model = model
         self.tokenizer = tokenizer
+        self.accuracy_fn = accuracy_fn
         self.optimizer = optim
         self.args = strategy.args
         self.generate_kwargs = generate_kwargs
@@ -93,6 +95,8 @@ class SFTTrainer(ABC):
         if args.eval_steps == -1:
             args.eval_steps = num_update_steps_per_epoch  # Evaluate once per epoch
         if args.save_steps == -1:
+            args.save_steps = num_update_steps_per_epoch
+        elif args.save_steps == 0:
             args.save_steps = float("inf")  # do not save ckpt
 
         # Restore step and start_epoch
@@ -208,7 +212,7 @@ class SFTTrainer(ABC):
         self.model.eval()
         with torch.no_grad():
             loss_sum = 0
-            reward_sum = 0
+            acc_sum = 0
             step_bar = tqdm(
                 range(eval_dataloader.__len__()),
                 desc="Eval stage of steps %d" % steps,
@@ -253,12 +257,12 @@ class SFTTrainer(ABC):
                     **self.generate_kwargs
                 )
                 generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
-                reward = calculate_accuracy(generated_texts, infos["answer_value"])
+                acc = self.accuracy_fn(generated_texts, infos["answer_value"])
 
                 times += 1
                 loss_sum += loss.item()
-                reward_sum += sum(reward) / len(reward)
-                bar_dict = {"eval gpt_loss": loss_sum / times, "eval reward": reward_sum / times}
+                acc_sum += sum(acc) / len(acc)
+                bar_dict = {"eval gpt_loss": loss_sum / times, "eval acc": acc_sum / times}
                 step_bar.update()
                 logs = self.strategy.all_reduce(bar_dict)
                 step_bar.set_postfix(logs)
