@@ -112,7 +112,7 @@ def get_llm_for_sr_actor_critic(
                 "top_k": kwargs.get("top_k", None),
                 "top_p": kwargs.get("top_p", None),
                 "do_sample": kwargs.get("do_sample", True),
-                "early_stopping": True,
+                # "early_stopping": True,  # CHECK: remember to add this when num_beams > 1
                 "temperature": kwargs.get("temperature", 1),
                 "use_cache": True,
                 "num_beams": kwargs.get("num_beams", 1),

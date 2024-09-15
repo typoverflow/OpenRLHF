@@ -1,6 +1,6 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_name = "cheng98/llama-39m"
+model_name = "google/gemma-1.1-7b-it"
 
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)

@@ -121,34 +121,31 @@ class SRRLTrainer(ABC):
         args, 
         prompts_dataloader, 
         pretrain_dataloader, 
+        num_update_steps_per_epoch=1, 
         # consumed_samples=0, 
         # num_update_steps_per_episodes=1, 
     ) -> None:
-        update_interval = args.rollout_batch_size // (self.strategy.world_size * self.micro_rollout_batch_size)
-        update_steps = args.rollout_batch_size // (self.strategy.world_size * self.micro_train_batch_size)
+        # micro_rollout_steps is the total number of step for micro rollout to generate rollout_batch_size samples
+        self.micro_rollout_steps = args.rollout_batch_size // (self.strategy.world_size * args.micro_rollout_batch_size)
+        # micro_update_steps is the total number of micro updates to perform one gradient step
+        self.micro_update_steps = args.train_batch_size // (self.strategy.world_size * args.micro_train_batch_size)
+        # update_steps is the total number of update steps to satisfy UTD
+        self.update_to_data_ratio = args.update_to_data_ratio
+        self.update_steps = args.rollout_batch_size // args.train_batch_size * args.update_to_data_ratio
 
-        
-        
-        # num_rollouts_per_episodes = (
-        #     num_update_steps_per_episodes * args.train_batch_size // args.max_epochs // args.rollout_batch_size
-        # )
-        # # make sure UTD = 1
-        # update_timesteps = args.rollout_batch_size // (self.strategy.world_size * self.micro_train_batch_size)
-        
-        # # get eval and save steps
-        # if args.eval_steps == -1:
-        #     args.eval_steps = num_rollouts_per_episodes  # Evaluate once per epoch
-        # if args.save_steps == -1:
-        #     args.save_steps = float("inf")  # do not save ckpt
+        if args.eval_steps == -1:
+            self.eval_steps = num_update_steps_per_epoch
+        if args.save_steps == -1:
+            self.save_steps = num_update_steps_per_epoch
+        elif args.save_steps == 0:
+            self.save_steps = float("inf")
             
+        # data loaders
         self.prompts_dataloader = prompts_dataloader
         self.pretrain_dataloader = pretrain_dataloader
 
-        # Restore step and start_epoch
-        # steps = consumed_samples // args.rollout_batch_size * update_timesteps + 1
-        # start_epoch = consumed_samples // args.rollout_batch_size // num_rollouts_per_episodes
-        # consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
-        steps = 0
+        self.tot_rollout_micro_steps = 0
+        self.tot_update_micro_steps = 0
         start_epoch = 0
         consumed_samples = 0
         for epoch in range(start_epoch, args.max_epochs):
@@ -169,54 +166,38 @@ class SRRLTrainer(ABC):
                     **self.generate_kwargs
                 )
                 self.replay_buffer.append(experience)
-                if (steps+1) % update_interval == 0:
-                    # print the output
+                self.tot_rollout_micro_steps += 1
+                
+                if self.tot_rollout_micro_steps % self.micro_rollout_steps == 0:
+                    # samples are ready, start update
                     output = self.tokenizer.batch_decode(experience.sequences, skip_special_tokens=True)
                     self.strategy.print(output[0])
-
-                    # train for several steps
-                    global_steps = steps // update_interval
-                    torch.cuda.empty_cache()
-                    status = self.rl_train(global_steps, update_steps)
-                    torch.cuda.empty_cache()
-
-                    if "kl" in status:
-                        self.kl_ctl.update(status["kl"], args.rollout_batch_size)
-                    pbar.set_postfix(status)
                     
-                    # logs/checkpoints
-                    # client_states = {"consumed_samples": global_steps * args.rollout_batch_size}
-                    # self.save_logs_and_checkpoints(args, global_steps, pbar, status, client_states)
+                    status_mean = {}  # stores the average statistics during one update
+                    status_list = []
+                    torch.cuda.empty_cache()
+                    for _ in range(self.update_steps * self.micro_update_steps):
+                        experience = self.replay_buffer.sample()
+                        status = {}
+                        status.update(self.training_step_actor(experience))
+                        status.update(self.training_step_critic(experience))
+                        status_list.append(status)
+                        self.tot_update_micro_steps += 1
+
+                        # evaluation and checkpoint saving
+                        if self.tot_update_micro_steps % self.strategy.accumulated_gradient == 0:
+                            self.save_logs_and_checkpoint(args, self.tot_update_micro_steps//self.strategy.accumulated_gradient, status, pbar)
+                                
+                    torch.cuda.empty_cache()
+                    
+                    status_mean["act_loss"] = sum([s["actor_loss"] for s in status_list if "actor_loss" in s])
+                    status_mean["cri_loss"] = sum([s["critic_loss"] for s in status_list if "critic_loss" in s])
+                    status_mean["act_loss"] /= self.update_steps * self.micro_update_steps
+                    status_mean["cri_loss"] /= self.update_steps * self.micro_update_steps
+                    pbar.set_postfix(status_mean)
 
                 pbar.update()
-                steps = steps + 1
                 
-    def rl_train(self, global_steps=0, update_steps=1):
-        # dataloader = DataLoader(
-        #     self.replay_buffer, 
-        #     batch_size=self.replay_buffer.sample_batch_size, 
-        #     shuffle=True, 
-        #     drop_last=True, 
-        #     pin_memory=self.dataloader_pin_memory, 
-        #     collate_fn=self.replay_buffer.collate_fn, 
-        # )
-        # dataloader = iter(dataloader)
-
-        status_list = []
-        status_mean = {}
-        for step in tqdm(range(update_steps), desc="Train step"):
-            # experience = next(dataloader)
-            experience = self.replay_buffer.sample()
-            
-            this_status = {}
-            if global_steps > self.freezing_actor_steps:
-                this_status = self.training_step_actor(experience)
-            this_status.update(self.training_step_critic(experience))
-
-            # TODO save the statistics
-
-        return status_mean
-
     def training_step_actor(self, experience: Experience) -> Dict[str, float]:
         self.actor.train()
         self.critic.requires_grad_(False)  # this is importance because deepspeed do not support differentiate through multiple engines that require gradients
@@ -281,3 +262,24 @@ class SRRLTrainer(ABC):
         }
         return status
 
+    def save_logs_and_checkpoints(self, args, global_step, status, pbar):
+        if global_step % args.logging_steps == 0:
+            # wandb
+            if (
+                self._wandb is not None
+                and self.strategy.is_rank_0()
+                and global_step % self.strategy.accumulated_gradient == 0
+            ):
+                logs = {"train/%s" % k: v for k, v in {**status, "global_step": global_step}.items()}
+                self._wandb.log(logs)
+                
+        # eval
+        if global_step % args.eval_steps == 0:
+            self.evaluate(self.eval_dataloader, global_step)
+
+        # save ckpt
+        if global_step % args.save_steps == 0:
+            tag = f"global_step{global_step}"
+            self.strategy.save_ckpt(
+                
+            )

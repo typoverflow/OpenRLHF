@@ -139,7 +139,8 @@ def train(args):
         pretrain_dataloader = None
         
     # TODO: fix the max steps calculation
-    max_steps = 10000
+    update_steps_per_epoch = len(prompts_dataloader) * args.micro_rollout_batch_size // args.train_batch_size
+    max_steps = update_steps_per_epoch * args.max_epochs
     actor_scheduler = get_scheduler(
         "cosine_with_min_lr",
         actor_optim,
@@ -203,7 +204,8 @@ def train(args):
     trainer.fit(
         args, 
         prompts_dataloader, 
-        pretrain_dataloader
+        pretrain_dataloader, 
+        update_steps_per_epoch
     )
 
     # save model checkpoint after fitting on only rank0
@@ -333,6 +335,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic_hidden_size", type=int, default=None)
     parser.add_argument("--reasoning_dataset", type=str, default="gsm8k", help="Dataset prefix")
     parser.add_argument("--cot_mode", type=str, default="nl", help="CoT mode, nl or python_sdp")
+    parser.add_argument("--update_to_data_ratio", type=int, default=1, help="Update-to-data (UTD) ratio")
     args = parser.parse_args()
 
     if args.critic_pretrain is None:
