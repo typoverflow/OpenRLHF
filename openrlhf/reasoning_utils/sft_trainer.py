@@ -271,7 +271,7 @@ class SFTTrainer(ABC):
             if self.strategy.is_rank_0():
                 self.strategy.print(f"######### Evaluation #########")
                 for _ in range(min(len(generated_texts), 4)):
-                    self.strategy.print(f"Reward: {reward[_]}, Text: {generated_texts[_]}")
+                    self.strategy.print(f"Reward: {acc[_]}, Text: {generated_texts[_]}")
                     self.strategy.print(f"##############")
             ###
 

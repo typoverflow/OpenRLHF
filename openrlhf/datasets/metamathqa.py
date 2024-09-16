@@ -195,6 +195,8 @@ def floatify(x):
 def compare_answer(pred, target):
     if pred is None:
         return False
+    if target is None:
+        assert False, f"pred: {pred}, target: {target}"
     return abs(pred - target) <= 1e-2
 
 def reward_fn(generated_texts, answer_values):
