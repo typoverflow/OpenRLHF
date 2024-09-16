@@ -88,6 +88,8 @@ def prepare_metamathqa_dataset(
         load_from_cache_file=True, 
         keep_in_memory=False
     )
+    
+    
     return dataset
 
 
@@ -188,7 +190,7 @@ class MetaMathQASFTDataset(torch.utils.data.Dataset):
 # reward calculation
 def floatify(x):
     try:
-        return float(x)
+        return float(x.replace(",", ""))
     except:
         return None
     
