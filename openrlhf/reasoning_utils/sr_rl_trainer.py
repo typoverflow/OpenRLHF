@@ -47,6 +47,7 @@ class SRRLTrainer(ABC):
         dataloader_pin_memory: bool = True,
         remote_rm_url: str = None, 
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        accuracy_fn: Any = None, 
         **generate_kwargs,
     ) -> None:
         super().__init__()
@@ -66,6 +67,7 @@ class SRRLTrainer(ABC):
         self.ema_beta = ema_beta
         self.gradient_checkpointing = gradient_checkpointing
         self.reward_fn = reward_fn
+        self.accuracy_fn = accuracy_fn
 
         self.actor = actor
         self.critic = critic
@@ -120,6 +122,7 @@ class SRRLTrainer(ABC):
         self, 
         args, 
         prompts_dataloader, 
+        eval_dataloader, 
         pretrain_dataloader, 
         num_update_steps_per_epoch=1, 
         # consumed_samples=0, 
@@ -132,6 +135,7 @@ class SRRLTrainer(ABC):
         # update_steps is the total number of update steps to satisfy UTD
         self.update_to_data_ratio = args.update_to_data_ratio
         self.update_steps = args.rollout_batch_size // args.train_batch_size * args.update_to_data_ratio
+        self.freeze_actor_steps = args.freeze_actor_steps
 
         if args.eval_steps == -1:
             self.eval_steps = num_update_steps_per_epoch
@@ -142,6 +146,7 @@ class SRRLTrainer(ABC):
             
         # data loaders
         self.prompts_dataloader = prompts_dataloader
+        self.eval_dataloader = eval_dataloader
         self.pretrain_dataloader = pretrain_dataloader
 
         self.tot_rollout_micro_steps = 0
@@ -159,16 +164,19 @@ class SRRLTrainer(ABC):
                 disable=not self.strategy.is_rank_0(),
             )
             
-            for rand_prompts in self.prompts_dataloader:
+            for _, __, ___, info in self.prompts_dataloader:
+                prompt_ids = info["prompt_ids"].to(torch.cuda.current_device())
+                prompt_attention_mask = info["prompt_attention_mask"].to(torch.cuda.current_device())
                 experience = self.experience_maker.make_experience(
-                    prompts=rand_prompts["prompt"], 
-                    answer_values=rand_prompts["answer_value"], 
+                    prompt_ids=prompt_ids, 
+                    prompt_attention_mask=prompt_attention_mask, 
+                    answer_value=info["answer_value"], 
                     **self.generate_kwargs
                 )
                 self.replay_buffer.append(experience)
                 self.tot_rollout_micro_steps += 1
                 
-                if self.tot_rollout_micro_steps % self.micro_rollout_steps == 0:
+                if (self.tot_rollout_micro_steps % self.micro_rollout_steps == 0):
                     # samples are ready, start update
                     output = self.tokenizer.batch_decode(experience.sequences, skip_special_tokens=True)
                     self.strategy.print(output[0])
@@ -199,6 +207,8 @@ class SRRLTrainer(ABC):
                 pbar.update()
                 
     def training_step_actor(self, experience: Experience) -> Dict[str, float]:
+        if self.tot_update_micro_steps < self.freeze_actor_steps * self.micro_update_steps:
+            return {}
         self.actor.train()
         self.critic.requires_grad_(False)  # this is importance because deepspeed do not support differentiate through multiple engines that require gradients
         
@@ -262,7 +272,7 @@ class SRRLTrainer(ABC):
         }
         return status
 
-    def save_logs_and_checkpoints(self, args, global_step, status, pbar):
+    def save_logs_and_checkpoint(self, args, global_step, status, pbar):
         if global_step % args.logging_steps == 0:
             # wandb
             if (
@@ -280,6 +290,55 @@ class SRRLTrainer(ABC):
         # save ckpt
         if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
-            self.strategy.save_ckpt(
-                
+            self.strategy.save_model(
+                self.actor, 
+                self.tokenizer, 
+                os.path.join(args.save_path, tag)
             )
+            # self.strategy.save_ckpt(
+            #     self.model.model, args.ckpt_path, tag, args.max_ckpt_num, args.max_ckpt_mem, {}    
+            # )
+        
+    def evaluate(self, eval_dataloader, global_step=0):
+        times = 0
+        self.actor.eval()
+        with torch.no_grad():
+            acc_sum = 0
+            step_bar = tqdm(
+                range(eval_dataloader.__len__()),
+                desc="Eval stage of steps %d" % global_step,
+                disable=not self.strategy.is_rank_0(),
+            )
+
+            for prompts_id_lens, inputs, attention_masks, infos in eval_dataloader:
+                # generation
+                prompt_ids = infos["prompt_ids"].to(torch.cuda.current_device())
+                prompt_attention_mask = infos["prompt_attention_mask"].to(torch.cuda.current_device())
+                sequences, attention_mask, action_mask = self.actor.generate(
+                    input_ids=prompt_ids, 
+                    attention_mask=prompt_attention_mask, 
+                    **self.generate_kwargs
+                )
+                generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
+                acc = self.accuracy_fn(generated_texts, infos["answer_value"])
+
+                times += 1
+                acc_sum += sum(acc) / len(acc)
+                bar_dict = {"eval acc": acc_sum / times}
+                step_bar.update()
+                logs = self.strategy.all_reduce(bar_dict)
+                step_bar.set_postfix(logs)
+                
+            ### print the results
+            if self.strategy.is_rank_0():
+                self.strategy.print(f"######### Evaluation #########")
+                for _ in range(min(len(generated_texts), 4)):
+                    self.strategy.print(f"Reward: {acc[_]}, Text: {generated_texts[_]}")
+                    self.strategy.print(f"##############")
+            ###
+
+            if self._wandb is not None and self.strategy.is_rank_0():
+                logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": global_step}.items()}
+                self._wandb.log(logs)
+        self.actor.train()  # reset model state
+

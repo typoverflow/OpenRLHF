@@ -83,18 +83,19 @@ class SRRLExperienceMaker(ABC):
         return {k: v.to(device) for k, v in batch.items()}
     
     @torch.no_grad()
-    def make_experience(self, prompts: Union[str, List[str]], answer_values, **generate_kwargs) -> Experience:
+    def make_experience(self, prompt_ids, prompt_attention_mask, answer_value, **generate_kwargs) -> Experience:
         model_to_go = self.ema_model if self.use_ema_model else self.model
         model_to_go.eval()
 
         # return dicts to capture the hidden states
-        inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
-        sequences, attention_mask, action_mask, info = model_to_go.generate(**inputs, return_info=True, **generate_kwargs)
+        # inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
+        sequences, attention_mask, action_mask, info = model_to_go.generate(prompt_ids, attention_mask=prompt_attention_mask, return_info=True, **generate_kwargs)
         hidden_states = info["hidden_states"]
         num_actions = action_mask.size(1)
 
         generated_texts = self.tokenizer.batch_decode(sequences.cpu().numpy().tolist(), skip_special_tokens=True)
-        r = calculate_reward(generated_texts, answer_values)
+        r = self.reward_fn(generated_texts, answer_value)
+        # r = calculate_reward(generated_texts, answer_value)
         r = torch.tensor(r).unsqueeze(-1).to(torch.cuda.current_device()).to(hidden_states.dtype)
 
         info = { 

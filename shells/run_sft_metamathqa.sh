@@ -4,9 +4,8 @@ deepspeed \
    --max_len 2048 \
    --train_batch_size 8 \
    --micro_train_batch_size 4 \
-   --max_samples 500000 \
    --pretrain google/gemma-2b-it \
-   --save_path ./checkpoint/gemma-2b-it-sft-metamathqa/save \
+   --save_path ./checkpoint/gemma-2b-it-sft-metamathqa \
    --ckpt_path ./checkpoint/gemma-2b-it-sft-metamathqa \
    --logging_steps 1 \
    --zero_stage 2 \

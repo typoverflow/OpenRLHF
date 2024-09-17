@@ -10,7 +10,7 @@ from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
 from openrlhf.datasets.metamathqa import (
     prepare_metamathqa_dataset, 
-    accuracy_fn, 
+    gsm8k_accuracy_fn, 
     MetaMathQASFTDataset
 )
 from openrlhf.reasoning_utils.sft_trainer import SFTTrainer
@@ -127,7 +127,7 @@ def train(args):
         batch_size=args.train_batch_size,
         max_epochs=args.max_epochs,
         tokenizer=tokenizer,
-        accuracy_fn=accuracy_fn, 
+        accuracy_fn=gsm8k_accuracy_fn, 
         # for GPT generation
         max_new_tokens=args.max_new_tokens, 
         do_sample=False, 
@@ -142,7 +142,7 @@ def train(args):
     trainer.fit(args, consumed_samples, num_update_steps_per_epoch)
 
     # save model checkpoint after fitting on only rank0
-    strategy.save_model(model, tokenizer, args.save_path)
+    strategy.save_model(model, tokenizer, os.path.join(args.save_path, "final"))
 
 
 if __name__ == "__main__":
@@ -207,7 +207,7 @@ if __name__ == "__main__":
         "--apply_chat_template", action="store_true", default=False, help="Use HF tokenizer chat template"
     )
     parser.add_argument("--tokenizer_chat_template", type=str, default=None)
-    parser.add_argument("--max_samples", type=int, default=1e8, help="Max number of samples")
+    parser.add_argument("--max_samples", type=int, default=None, help="Max number of samples")
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
 
     # wandb parameters

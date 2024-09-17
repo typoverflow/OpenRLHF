@@ -1,0 +1,26 @@
+deepspeed \
+    --include localhost:0,1 \
+    --module openrlhf.cli.train_rl_metamathqa \
+    --pretrain ./checkpoint/gemma-2b-it-sft-metamathqa \
+    --save_path ./checkpoint/gemma-2b-it-rl-metamathqa-critic \
+    --save_steps -1 \
+    --logging_steps 1 \
+    --eval_steps -1 \
+    --micro_train_batch_size 4 \
+    --train_batch_size 128 \
+    --micro_rollout_batch_size 4 \
+    --rollout_batch_size 1024 \
+    --max_epochs 2 \
+    --prompt_max_len 1024 \
+    --generate_max_len 1024 \
+    --zero_stage 2 \
+    --bf16 \
+    --actor_learning_rate 5e-7 \
+    --critic_learning_rate 1e-5 \
+    --adam_offload \
+    --flash_attn \
+    --gradient_checkpointing \
+    --lora_rank 16 \
+    --freeze_actor_steps 999999999999 \
+    --dataset_path ./assets/metamathqa \
+    --use_wandb 873bf35f283defae45b0d2a39312deaed163f7d6

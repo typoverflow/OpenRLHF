@@ -1,3 +1,4 @@
+import os
 import math
 from abc import ABC
 
@@ -203,9 +204,15 @@ class SFTTrainer(ABC):
         # TODO: save best model on dev, use loss/perplexity on whole dev dataset as metric
         if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
-            self.strategy.save_ckpt(
-                self.model.model, args.ckpt_path, tag, args.max_ckpt_num, args.max_ckpt_mem, client_states
+            self.strategy.save_model(
+                self.model.model, 
+                self.tokenizer, 
+                os.path.join(args.save_path, tag)
+                
             )
+            # self.strategy.save_ckpt(
+            #     self.model.model, args.ckpt_path, tag, args.max_ckpt_num, args.max_ckpt_mem, client_states
+            # )
 
     def evaluate(self, eval_dataloader, steps=0):
         times = 0

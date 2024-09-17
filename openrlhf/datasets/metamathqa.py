@@ -27,7 +27,7 @@ def prepare_metamathqa_dataset(
     dataset_path, 
     mode="train", 
     strategy=None, 
-    max_count=int(9e9), 
+    max_count=None, 
 ):
     dataset_name = {
         "train": "train.jsonl", 
@@ -78,9 +78,9 @@ def prepare_metamathqa_dataset(
             new_batch["answer"].append(answer)
         return new_batch
 
-    dataset = dataset\
-    .select(range(min(max_count, len(dataset))))\
-    .map(
+    if max_count is not None:
+        dataset = dataset.select(range(min(max_count, len(dataset))))
+    dataset = dataset.map(
         apply_template, 
         batched=True, 
         remove_columns=dataset.column_names, 
@@ -201,16 +201,24 @@ def compare_answer(pred, target):
         assert False, f"pred: {pred}, target: {target}"
     return abs(pred - target) <= 1e-2
 
-def reward_fn(generated_texts, answer_values):
+def gsm8k_reward_fn(generated_texts, answer_values):
     pred_values = [
         floatify(res.split(TRAIN_ANSWER_PREFIX)[-1].strip()) for res in generated_texts
     ]
     target_values = [
         floatify(res.strip()) for res in answer_values
     ]
-    assert False
+    rewards = []
+    for pred, target in zip(pred_values, target_values):
+        if pred is None:
+            rewards.append(0.0)
+        elif compare_answer(pred, target):
+            rewards.append(1.0)
+        else:
+            rewards.append(0.1)
+    return rewards
     
-def accuracy_fn(generated_texts, answer_values):
+def gsm8k_accuracy_fn(generated_texts, answer_values):
     pred_values = [
         floatify(res.split(TRAIN_ANSWER_PREFIX)[-1].strip()) for res in generated_texts
     ]
