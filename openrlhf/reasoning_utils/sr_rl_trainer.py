@@ -138,11 +138,11 @@ class SRRLTrainer(ABC):
         self.freeze_actor_steps = args.freeze_actor_steps
 
         if args.eval_steps == -1:
-            self.eval_steps = num_update_steps_per_epoch
+            args.eval_steps = num_update_steps_per_epoch
         if args.save_steps == -1:
-            self.save_steps = num_update_steps_per_epoch
+            args.save_steps = num_update_steps_per_epoch
         elif args.save_steps == 0:
-            self.save_steps = float("inf")
+            args.save_steps = float("inf")
             
         # data loaders
         self.prompts_dataloader = prompts_dataloader
