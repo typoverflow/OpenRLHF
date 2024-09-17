@@ -1,0 +1,25 @@
+deepspeed \
+    --include localhost:0 \
+    --module openrlhf.cli.train_rl_metamathqa \
+    --pretrain ./checkpoint/llama-39m \
+    --save_path ./checkpoint/llama-39m-rl \
+    --save_steps -1 \
+    --logging_steps 1 \
+    --eval_steps -1 \
+    --micro_train_batch_size 4 \
+    --train_batch_size 8 \
+    --micro_rollout_batch_size 2 \
+    --rollout_batch_size 16 \
+    --max_epochs 2 \
+    --prompt_max_len 1024 \
+    --generate_max_len 1024 \
+    --zero_stage 2 \
+    --bf16 \
+    --actor_learning_rate 5e-7 \
+    --critic_learning_rate 1e-5 \
+    --adam_offload \
+    --flash_attn \
+    --gradient_checkpointing \
+    --lora_rank 16 \
+    --freeze_actor_steps 999999999999 \
+    --dataset_path ./assets/metamathqa \

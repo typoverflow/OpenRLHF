@@ -23,8 +23,10 @@ from openrlhf.reasoning_utils.sr_rl_trainer import SRRLTrainer
 from openrlhf.datasets.metamathqa import (
     MetaMathQASFTDataset, 
     prepare_metamathqa_dataset, 
-    gsm8k_reward_fn, 
-    gsm8k_accuracy_fn
+    # gsm8k_reward_fn, 
+    # gsm8k_accuracy_fn
+    math_reward_fn, 
+    math_accuracy_fn,
 )
 
 def train(args):
@@ -49,8 +51,10 @@ def train(args):
     )
     
     reward_model = None
-    reward_fn = gsm8k_reward_fn
-    accuracy_fn = gsm8k_accuracy_fn
+    # reward_fn = gsm8k_reward_fn
+    # accuracy_fn = gsm8k_accuracy_fn
+    reward_fn = math_reward_fn
+    accuracy_fn = math_accuracy_fn
 
     # configure tokenzier
     tokenizer = get_tokenizer(args.pretrain, actor, "left", strategy, use_fast=not args.disable_fast_tokenizer)

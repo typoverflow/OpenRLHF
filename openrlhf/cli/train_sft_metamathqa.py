@@ -10,7 +10,7 @@ from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
 from openrlhf.datasets.metamathqa import (
     prepare_metamathqa_dataset, 
-    gsm8k_accuracy_fn, 
+    math_accuracy_fn, 
     MetaMathQASFTDataset
 )
 from openrlhf.reasoning_utils.sft_trainer import SFTTrainer
@@ -127,7 +127,7 @@ def train(args):
         batch_size=args.train_batch_size,
         max_epochs=args.max_epochs,
         tokenizer=tokenizer,
-        accuracy_fn=gsm8k_accuracy_fn, 
+        accuracy_fn=math_accuracy_fn, 
         # for GPT generation
         max_new_tokens=args.max_new_tokens, 
         do_sample=False, 

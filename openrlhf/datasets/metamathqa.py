@@ -6,6 +6,7 @@ from tqdm import tqdm
 import torch
 
 from openrlhf.datasets.utils import zero_pad_sequences
+from openrlhf.reasoning_utils.eval import is_equiv
 
 # prompt template
 PROMPT_DICT = {
@@ -229,5 +230,17 @@ def gsm8k_accuracy_fn(generated_texts, answer_values):
         compare_answer(pred, target) for pred, target in zip(pred_values, target_values)
     ]
     return correct
+
+def math_reward_fn(generated_texts, answer_values):
+    pred_strings = [
+        res.split(TEST_ANSWER_PREFIX)[-1].strip() for res in generated_texts
+    ]
+    target_strings = answer_values
+    correct = [
+        is_equiv(pred, target) for pred, target in zip(pred_strings, target_strings)
+    ]
+    return correct
+
+math_accuracy_fn = math_reward_fn
      
     
