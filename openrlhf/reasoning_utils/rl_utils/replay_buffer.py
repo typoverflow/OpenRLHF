@@ -93,7 +93,12 @@ def zero_pad_sequences(sequences: List[torch.Tensor], side: str = "left") -> tor
     padded_sequences = []
     for seq in sequences:
         pad_len = max_len - seq.size(0)
-        padding = (pad_len, 0) if side == "left" else (0, pad_len)
+        padding = [0 for _ in range(2*len(seq.shape))]
+        if side == "left":
+            padding[-2] = pad_len
+        else:
+            padding[-1] = pad_len
+        # padding = (pad_len, 0) if side == "left" else (0, pad_len)
         padded_sequences.append(F.pad(seq, padding))
     return torch.stack(padded_sequences, dim=0)
 
