@@ -21,7 +21,6 @@ from .utils import reset_position_ids
 from openrlhf.utils.logging_utils import init_logger
 
 from openrlhf.models.actor import Actor
-from trl import PreTrainedModelWrapper
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from dataclasses import dataclass
