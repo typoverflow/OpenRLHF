@@ -233,7 +233,7 @@ def gsm8k_accuracy_fn(generated_texts, answer_values):
 
 def math_reward_fn(generated_texts, answer_values):
     pred_strings = [
-        res.split(TEST_ANSWER_PREFIX)[-1].strip() for res in generated_texts
+        res.split(TRAIN_ANSWER_PREFIX)[-1].strip() for res in generated_texts
     ]
     target_strings = answer_values
     correct = [

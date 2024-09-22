@@ -1,14 +1,14 @@
 deepspeed \
     --include localhost:0,1 \
     --module openrlhf.cli.train_rl_metamathqa \
-    --pretrain ./checkpoint/gemma-2b-it-sft-metamathqa \
+    --pretrain ./checkpoint/gemma-2b-it-sft-metamathqa/final/ \
     --save_path ./checkpoint/gemma-2b-it-rl-metamathqa-critic \
     --save_steps -1 \
     --logging_steps 1 \
     --eval_steps -1 \
-    --micro_train_batch_size 4 \
+    --micro_train_batch_size 64 \
     --train_batch_size 128 \
-    --micro_rollout_batch_size 4 \
+    --micro_rollout_batch_size 16 \
     --rollout_batch_size 1024 \
     --max_epochs 2 \
     --prompt_max_len 1024 \
