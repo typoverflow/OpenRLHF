@@ -22,5 +22,6 @@ deepspeed \
     --gradient_checkpointing \
     --lora_rank 16 \
     --freeze_actor_steps 999999999999 \
+    --critic_beta 0.99 \
     --dataset_path ./assets/metamathqa \
     --use_wandb 873bf35f283defae45b0d2a39312deaed163f7d6
