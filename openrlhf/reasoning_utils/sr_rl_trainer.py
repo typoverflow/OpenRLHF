@@ -29,11 +29,13 @@ class SRRLTrainer(ABC):
         actor: nn.Module, 
         critic: nn.Module, 
         ema_actor: nn.Module, 
+        ema_critic: nn.Module, 
         actor_optim: Optimizer, 
         critic_optim: Optimizer, 
         actor_scheduler: Any, 
         critic_scheduler: Any, 
-        ema_beta: float = 0.992, 
+        critic_beta: float = 0.995, 
+        actor_beta: float = 0.995, 
         ptx_coef: float = 0.0, 
         micro_train_batch_size: int = 8, 
         buffer_limit: int = 0, 
@@ -64,7 +66,8 @@ class SRRLTrainer(ABC):
         self.ptx_coef = ptx_coef
         self.micro_train_batch_size = micro_train_batch_size
         self.prompt_max_len = prompt_max_len
-        self.ema_beta = ema_beta
+        self.actor_beta = actor_beta
+        self.critic_beta = critic_beta
         self.gradient_checkpointing = gradient_checkpointing
         self.reward_fn = reward_fn
         self.accuracy_fn = accuracy_fn
@@ -72,6 +75,7 @@ class SRRLTrainer(ABC):
         self.actor = actor
         self.critic = critic
         self.ema_actor = ema_actor
+        self.ema_critic = ema_critic
         self.actor_optim = actor_optim
         self.critic_optim = critic_optim
         self.actor_scheduler = actor_scheduler
@@ -248,7 +252,10 @@ class SRRLTrainer(ABC):
             results = self.actor(experience.sequences, experience.attention_mask)
             all_hidden_states = results.roll_reps[:, -experience.action_mask.size(1):]
             # next_hidden_states = results.roll_reps[:, -experience.action_mask.size(1)+1:] # select the next hidden states
-            all_target_values = self.critic(all_hidden_states)
+            if self.critic_beta is not None:
+                all_target_values = self.ema_critic(all_hidden_states)
+            else:
+                all_target_values = self.critic(all_hidden_states)
             # target_values = self.critic(next_hidden_states)
 
             # determine where to insert the reward
@@ -263,7 +270,8 @@ class SRRLTrainer(ABC):
         self.strategy.zero_grad(self.critic_optim, self.critic)
         self.strategy.backward(critic_loss, self.critic, self.critic_optim)
         self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
-        
+        if self.critic_beta is not None:
+            self.strategy.moving_average(self.critic, self.ema_critic, self.critic_beta, self.ema_critic.device)        
         self.critic.eval()
         status = {
             "critic_loss": critic_loss.item(), 

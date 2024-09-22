@@ -191,7 +191,6 @@ def get_llm_for_sr_actor_critic(
                 nn.ReLU(), 
                 nn.Linear(critic_hidden_size, 1)
             )
-            # TODO no normalize reward
 
         def forward(
             self, 
@@ -272,6 +271,7 @@ def get_llm_for_sr_actor_critic(
     # because deepspeed.zero.Init() will not intialize them.
     # TODO: Find a better way to clarify reward model training.
     critic = CriticWithSR(config.hidden_size, config.critic_hidden_size)
+    ema_critic = CriticWithSR(config.hidden_size, config.critic_hidden_size)
     if init_value_head:
         if dschf is not None:
             logger.info("initialize value_head for ZeRO-3 reward model training.")
@@ -282,8 +282,8 @@ def get_llm_for_sr_actor_critic(
             critic.value_head[0].weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
             critic.value_head[2].weight.data.normal_(mean=0.0, std=1 / (config.critic_hidden_size + 1))
             critic.value_head[4].weight.data.normal_(mean=0.0, std=1 / (config.critic_hidden_size + 1))
-
-    return model, critic
+    ema_critic.load_state_dict(critic.state_dict())
+    return model, critic, ema_critic
 
 # from transformers.models.llama.modeling_llama import LlamaForCausalLM
 # a = LlamaForCausalLM.generate

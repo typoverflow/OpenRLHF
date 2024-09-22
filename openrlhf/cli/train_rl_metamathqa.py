@@ -34,7 +34,7 @@ def train(args):
     strategy = get_strategy(args)
     strategy.setup_distributed()
     
-    actor, critic = get_llm_for_sr_actor_critic(
+    actor, critic, ema_critic = get_llm_for_sr_actor_critic(
         args.pretrain, 
         "sr_actor_critic", 
         use_flash_attention_2=args.flash_attn,
@@ -189,11 +189,13 @@ def train(args):
     (
         (actor, actor_optim, actor_scheduler),
         (critic, critic_optim, critic_scheduler),
+        ema_critic, 
         reward_model,
         # initial_model,
     ) = strategy.prepare(
         (actor, actor_optim, actor_scheduler),
         (critic, critic_optim, critic_scheduler),
+        ema_critic, 
         reward_model,
         # initial_model,
         is_rlhf=True,
@@ -213,6 +215,7 @@ def train(args):
         actor, 
         critic, 
         ema_actor, 
+        ema_critic, 
         actor_optim, 
         critic_optim, 
         actor_scheduler, 
@@ -220,7 +223,8 @@ def train(args):
         micro_train_batch_size=args.micro_train_batch_size, 
         micro_rollout_batch_size=args.micro_rollout_batch_size, 
         gradient_checkpointing=args.gradient_checkpointing, 
-        ema_beta=0.992, 
+        critic_beta=args.critic_beta, 
+        actor_beta=args.actor_beta, 
         ptx_coef=args.ptx_coef, 
         max_epochs=args.max_epochs, 
         max_norm=args.max_norm, 
@@ -372,6 +376,8 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_pretrain", action="store_true", default=False, help="whether freeze the rff critic")
     parser.add_argument("--freeze_actor_steps", type=int, default=0, help="Number of steps which ckip the actor update")
     parser.add_argument("--critic_hidden_size", type=int, default=None)
+    parser.add_argument("--critic_beta", type=float, default=None, help="Critic EMA rate, None means no EMA")
+    parser.add_argument("--actor_beta", type=float, default=None, help="Critic EMA rate, None means no EMA")
     parser.add_argument("--dataset_path", type=str, default="./assets/metamathqa", help="Default path to the MetaMathQA dataset.")
     # parser.add_argument("--reasoning_dataset", type=str, default="gsm8k", help="Dataset prefix")
     # parser.add_argument("--cot_mode", type=str, default="nl", help="CoT mode, nl or python_sdp")
