@@ -223,6 +223,7 @@ class SRRLTrainer(ABC):
         actor_loss = - self.critic(hidden_states)
         actor_loss = masked_mean(actor_loss, action_mask, dim=-1).mean()
 
+        # self.strategy.zero_grad(self.actor_optim, self.actor)  # actually useless in deepspeed
         self.strategy.backward(actor_loss, self.actor, self.actor_optim)
         
         # TODO add mask
@@ -267,7 +268,7 @@ class SRRLTrainer(ABC):
         critic_loss = 0.5 * (target_values - values).pow(2)
         critic_loss = masked_mean(critic_loss, action_mask[:, :-1], dim=-1).mean()
 
-        self.strategy.zero_grad(self.critic_optim, self.critic)
+        # self.strategy.zero_grad(self.critic_optim, self.critic)  # this is actually useless
         self.strategy.backward(critic_loss, self.critic, self.critic_optim)
         self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
         if self.critic_beta is not None:

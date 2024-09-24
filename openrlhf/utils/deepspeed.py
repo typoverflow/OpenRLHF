@@ -301,7 +301,10 @@ class DeepspeedStrategy(ABC):
 
             # corner case for tie_word_embeddings, such as Qwen2-0.5B
             if getattr(model_to_save.config, "tie_word_embeddings", False):
-                state_dict_keys.remove("lm_head.weight")
+                if isinstance(model_to_save, PeftModel):
+                    state_dict_keys.remove("base_model.model.lm_head.weight")
+                else:
+                    state_dict_keys.remove("lm_head.weight")
 
             assert state_dict_keys.issubset(
                 output_state_dict_keys
