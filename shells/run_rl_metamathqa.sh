@@ -5,7 +5,7 @@ deepspeed \
     --save_path ./checkpoint/gemma-2b-it-rl-metamathqa-critic \
     --save_steps -1 \
     --logging_steps 1 \
-    --eval_steps -1 \
+    --eval_steps 256 \
     --micro_train_batch_size 64 \
     --train_batch_size 128 \
     --micro_rollout_batch_size 16 \
@@ -15,13 +15,13 @@ deepspeed \
     --generate_max_len 1024 \
     --zero_stage 2 \
     --bf16 \
-    --actor_learning_rate 5e-7 \
+    --actor_learning_rate 1e-6 \
     --critic_learning_rate 1e-5 \
     --adam_offload \
     --flash_attn \
     --gradient_checkpointing \
     --lora_rank 16 \
-    --freeze_actor_steps 999999999999 \
+    --freeze_actor_steps 128 \
     --critic_beta 0.99 \
     --dataset_path ./assets/metamathqa \
     --use_wandb 873bf35f283defae45b0d2a39312deaed163f7d6

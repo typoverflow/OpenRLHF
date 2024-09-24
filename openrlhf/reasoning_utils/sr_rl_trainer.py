@@ -157,6 +157,7 @@ class SRRLTrainer(ABC):
         self.tot_update_micro_steps = 0
         start_epoch = 0
         consumed_samples = 0
+        self.evaluate(eval_dataloader, global_step=0)  # first evaluation to generate reference score
         for epoch in range(start_epoch, args.max_epochs):
             if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
                 self.prompts_dataloader.sampler.set_epoch(
@@ -311,6 +312,7 @@ class SRRLTrainer(ABC):
     def evaluate(self, eval_dataloader, global_step=0):
         times = 0
         self.actor.eval()
+        self.generate_kwargs["do_sample"] = False  # use greedy decoding during evaluation
         with torch.no_grad():
             acc_sum = 0
             step_bar = tqdm(
@@ -349,5 +351,6 @@ class SRRLTrainer(ABC):
             if self._wandb is not None and self.strategy.is_rank_0():
                 logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": global_step}.items()}
                 self._wandb.log(logs)
+        self.generate_kwargs["do_sample"] = True  # reset to default
         self.actor.train()  # reset model state
 
